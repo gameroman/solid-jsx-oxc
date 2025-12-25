@@ -29,6 +29,7 @@ use oxc_span::SourceType;
 use std::path::PathBuf;
 
 use dom::SolidTransform;
+use ssr::SSRTransform;
 
 /// Result of a transform operation
 #[cfg(feature = "napi")]
@@ -82,11 +83,27 @@ pub struct JsTransformOptions {
 #[cfg(feature = "napi")]
 #[napi]
 pub fn transform_jsx(source: String, options: Option<JsTransformOptions>) -> TransformResult {
-    let options = options.unwrap_or_default();
-    let filename = options.filename.as_deref().unwrap_or("input.jsx");
-    let source_map = options.source_map.unwrap_or(false);
+    let js_options = options.unwrap_or_default();
 
-    let result = transform_internal(&source, filename, source_map);
+    // Convert JS options to internal options
+    let generate = match js_options.generate.as_deref() {
+        Some("ssr") => common::GenerateMode::Ssr,
+        Some("universal") => common::GenerateMode::Universal,
+        _ => common::GenerateMode::Dom,
+    };
+
+    let options = TransformOptions {
+        generate,
+        hydratable: js_options.hydratable.unwrap_or(false),
+        delegate_events: js_options.delegate_events.unwrap_or(true),
+        wrap_conditionals: js_options.wrap_conditionals.unwrap_or(true),
+        context_to_custom_elements: js_options.context_to_custom_elements.unwrap_or(true),
+        filename: js_options.filename.as_deref().unwrap_or("input.jsx"),
+        source_map: js_options.source_map.unwrap_or(false),
+        ..TransformOptions::solid_defaults()
+    };
+
+    let result = transform_internal(&source, &options);
 
     TransformResult {
         code: result.code,
@@ -97,32 +114,43 @@ pub fn transform_jsx(source: String, options: Option<JsTransformOptions>) -> Tra
 /// Internal transform function
 pub fn transform(source: &str, options: Option<TransformOptions>) -> CodegenReturn {
     let options = options.unwrap_or_else(TransformOptions::solid_defaults);
-    transform_internal(source, options.filename, options.source_map)
+    transform_internal(source, &options)
 }
 
-fn transform_internal(source: &str, filename: &str, source_map: bool) -> CodegenReturn {
+fn transform_internal(source: &str, options: &TransformOptions) -> CodegenReturn {
     let allocator = Allocator::default();
-    let source_type = SourceType::from_path(filename).unwrap_or(SourceType::tsx());
+    let source_type = SourceType::from_path(options.filename).unwrap_or(SourceType::tsx());
 
     // Parse the source
     let mut program = Parser::new(&allocator, source, source_type)
         .parse()
         .program;
 
-    // Create transform options
-    let options = TransformOptions::solid_defaults();
+    // Run the appropriate transform based on generate mode
+    let options_ref = unsafe { &*(options as *const TransformOptions) };
 
-    // Run the transform
-    let transformer = SolidTransform::new(&allocator, unsafe {
-        &*(&options as *const TransformOptions)
-    });
-    transformer.transform(&mut program);
+    match options.generate {
+        common::GenerateMode::Dom => {
+            let transformer = SolidTransform::new(&allocator, options_ref);
+            transformer.transform(&mut program);
+        }
+        common::GenerateMode::Ssr => {
+            let transformer = SSRTransform::new(&allocator, options_ref);
+            transformer.transform(&mut program);
+        }
+        common::GenerateMode::Universal => {
+            // Universal mode generates DOM with SSR fallback markers
+            // For now, use DOM transform
+            let transformer = SolidTransform::new(&allocator, options_ref);
+            transformer.transform(&mut program);
+        }
+    }
 
     // Generate code
     Codegen::new()
         .with_options(CodegenOptions {
-            source_map_path: if source_map {
-                Some(PathBuf::from(filename))
+            source_map_path: if options.source_map {
+                Some(PathBuf::from(options.filename))
             } else {
                 None
             },
@@ -169,6 +197,39 @@ mod tests {
     fn test_for_loop() {
         let source = r#"<For each={items}>{item => <div>{item}</div>}</For>"#;
         let result = transform(source, None);
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn test_ssr_basic_element() {
+        let source = r#"<div class="hello">world</div>"#;
+        let options = TransformOptions {
+            generate: common::GenerateMode::Ssr,
+            ..TransformOptions::solid_defaults()
+        };
+        let result = transform(source, Some(options));
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn test_ssr_dynamic_attribute() {
+        let source = r#"<div class={style()}>content</div>"#;
+        let options = TransformOptions {
+            generate: common::GenerateMode::Ssr,
+            ..TransformOptions::solid_defaults()
+        };
+        let result = transform(source, Some(options));
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn test_ssr_component() {
+        let source = r#"<Button onClick={handler}>Click me</Button>"#;
+        let options = TransformOptions {
+            generate: common::GenerateMode::Ssr,
+            ..TransformOptions::solid_defaults()
+        };
+        let result = transform(source, Some(options));
         assert!(!result.code.is_empty());
     }
 }

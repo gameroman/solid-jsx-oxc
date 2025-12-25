@@ -35,6 +35,7 @@ indexmap = "2.12.0"
 
 common = { path = "crates/common" }
 dom = { path = "crates/dom" }
+ssr = { path = "crates/ssr" }
 
 [dependencies]
 napi = { workspace = true, optional = true }
@@ -50,6 +51,7 @@ oxc_codegen = { workspace = true }
 
 common = { workspace = true }
 dom = { workspace = true }
+ssr = { workspace = true }
 
 [dev-dependencies]
 insta = "1.43.2"
