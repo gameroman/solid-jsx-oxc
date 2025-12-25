@@ -232,4 +232,25 @@ mod tests {
         let result = transform(source, Some(options));
         assert!(!result.code.is_empty());
     }
+
+    #[test]
+    fn test_ssr_output_preview() {
+        // Test various SSR outputs
+        let cases = [
+            (r#"<div class="hello">world</div>"#, "basic element"),
+            (r#"<div class={style()}>content</div>"#, "dynamic class"),
+            (r#"<div>{count()}</div>"#, "dynamic child"),
+            (r#"<For each={items}>{item => <li>{item}</li>}</For>"#, "For loop"),
+            (r#"<Show when={visible}><div>shown</div></Show>"#, "Show conditional"),
+        ];
+
+        for (source, label) in cases {
+            let options = TransformOptions {
+                generate: common::GenerateMode::Ssr,
+                ..TransformOptions::solid_defaults()
+            };
+            let result = transform(source, Some(options));
+            println!("\n=== {} ===\nInput:  {}\nOutput: {}", label, source, result.code);
+        }
+    }
 }

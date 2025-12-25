@@ -1,7 +1,30 @@
 //! Expression utilities for working with OXC AST
 
-use oxc_ast::ast::Expression;
+use oxc_ast::ast::{Expression, Statement};
+use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_span::Span;
+
+/// Convert an Expression AST node to its source code string
+pub fn expr_to_string(expr: &Expression<'_>) -> String {
+    let mut codegen = Codegen::new().with_options(CodegenOptions::default());
+    codegen.print_expression(expr);
+    codegen.into_source_text()
+}
+
+/// Convert a Statement AST node to its source code string
+pub fn stmt_to_string(stmt: &Statement<'_>) -> String {
+    // For statements, we need to wrap in a minimal program context
+    // But for most cases we just need expression statements
+    match stmt {
+        Statement::ExpressionStatement(expr_stmt) => {
+            expr_to_string(&expr_stmt.expression)
+        }
+        _ => {
+            // Fallback - this is less common
+            format!("/* unsupported statement */")
+        }
+    }
+}
 
 /// A simple expression node that tracks static vs dynamic
 pub struct SimpleExpression<'a> {

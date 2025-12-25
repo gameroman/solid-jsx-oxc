@@ -7,6 +7,7 @@ use oxc_ast::ast::{
     Expression, JSXElement, JSXFragment, JSXChild, JSXExpressionContainer,
     JSXText, Program,
 };
+use oxc_span::Span;
 use oxc_traverse::{Traverse, TraverseCtx, traverse_mut};
 use oxc_semantic::SemanticBuilder;
 
@@ -137,18 +138,22 @@ impl<'a> Traverse<'a, ()> for SSRTransform<'a> {
     fn enter_expression(
         &mut self,
         node: &mut Expression<'a>,
-        _ctx: &mut TraverseCtx<'a, ()>,
+        ctx: &mut TraverseCtx<'a, ()>,
     ) {
-        match node {
+        let new_expr = match node {
             Expression::JSXElement(element) => {
-                let _result = self.transform_jsx_element(element);
-                // TODO: Replace node with generated ssr call
+                let result = self.transform_jsx_element(element);
+                Some(self.build_ssr_expression(&result, ctx))
             }
             Expression::JSXFragment(fragment) => {
-                let _result = self.transform_fragment(fragment);
-                // TODO: Replace node with generated ssr call
+                let result = self.transform_fragment(fragment);
+                Some(self.build_ssr_expression(&result, ctx))
             }
-            _ => {}
+            _ => None,
+        };
+
+        if let Some(expr) = new_expr {
+            *node = expr;
         }
     }
 
@@ -156,5 +161,31 @@ impl<'a> Traverse<'a, ()> for SSRTransform<'a> {
         // Generate imports for helpers at the top of the file
         let _helpers = self.context.helpers.borrow();
         // TODO: Insert import statements
+    }
+}
+
+impl<'a> SSRTransform<'a> {
+    /// Build the SSR expression from the transform result
+    fn build_ssr_expression(
+        &self,
+        result: &SSRResult,
+        ctx: &mut TraverseCtx<'a, ()>,
+    ) -> Expression<'a> {
+        let ast = ctx.ast;
+        let span = Span::default();
+
+        // Generate the SSR call string representation
+        let ssr_code = result.to_ssr_call();
+
+        // Allocate the string in the arena
+        let allocated_str = ast.allocator.alloc_str(&ssr_code);
+
+        // For now, output as a simple string literal
+        // This is a simplified output - the actual output should be:
+        // - String literal for static content
+        // - Tagged template literal for dynamic content: ssr`...${escape(expr)}...`
+        //
+        // The string output shows what the final code should look like
+        ast.expression_string_literal(span, allocated_str, None)
     }
 }

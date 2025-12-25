@@ -10,7 +10,7 @@ use oxc_ast::ast::{
 
 use common::{
     TransformOptions,
-    is_svg_element,
+    is_svg_element, expr_to_string,
     constants::{PROPERTIES, CHILD_PROPERTIES, ALIASES, VOID_ELEMENTS},
     expression::escape_html,
 };
@@ -151,36 +151,37 @@ fn transform_attribute<'a>(
 
         // Dynamic value
         Some(JSXAttributeValue::ExpressionContainer(container)) => {
-            if let Some(_expr) = container.expression.as_expression() {
+            if let Some(expr) = container.expression.as_expression() {
+                let expr_str = expr_to_string(expr);
                 context.register_helper("escape");
 
                 // Handle special attributes
                 if key == "style" {
                     context.register_helper("ssrStyle");
                     result.push_static(&format!(" {}=\"", attr_name));
-                    result.push_dynamic("ssrStyle(/* expr */)".to_string(), false, true);
+                    result.push_dynamic(format!("ssrStyle({})", expr_str), false, true);
                     result.push_static("\"");
                 } else if key == "class" || key == "className" {
                     result.push_static(&format!(" {}=\"", attr_name));
-                    result.push_dynamic("/* class expr */".to_string(), true, false);
+                    result.push_dynamic(expr_str, true, false);
                     result.push_static("\"");
                 } else if key == "classList" {
                     context.register_helper("ssrClassList");
                     result.push_static(" class=\"");
-                    result.push_dynamic("ssrClassList(/* expr */)".to_string(), false, true);
+                    result.push_dynamic(format!("ssrClassList({})", expr_str), false, true);
                     result.push_static("\"");
                 } else if PROPERTIES.contains(key.as_str()) {
                     // Boolean attributes
                     context.register_helper("ssrAttribute");
                     result.push_dynamic(
-                        format!("ssrAttribute(\"{}\", /* expr */, true)", attr_name),
+                        format!("ssrAttribute(\"{}\", {}, true)", attr_name, expr_str),
                         false,
                         true,
                     );
                 } else {
                     // Regular attribute
                     result.push_static(&format!(" {}=\"", attr_name));
-                    result.push_dynamic("/* expr */".to_string(), true, false);
+                    result.push_dynamic(expr_str, true, false);
                     result.push_static("\"");
                 }
             }
@@ -211,16 +212,20 @@ fn transform_children<'a>(
             };
 
             if key == "innerHTML" {
-                if let Some(JSXAttributeValue::ExpressionContainer(_)) = &attr.value {
-                    // innerHTML - don't escape
-                    result.push_dynamic("/* innerHTML */".to_string(), false, true);
-                    return;
+                if let Some(JSXAttributeValue::ExpressionContainer(container)) = &attr.value {
+                    if let Some(expr) = container.expression.as_expression() {
+                        // innerHTML - don't escape
+                        result.push_dynamic(expr_to_string(expr), false, true);
+                        return;
+                    }
                 }
             } else if key == "textContent" || key == "innerText" {
-                if let Some(JSXAttributeValue::ExpressionContainer(_)) = &attr.value {
-                    context.register_helper("escape");
-                    result.push_dynamic("/* textContent */".to_string(), false, false);
-                    return;
+                if let Some(JSXAttributeValue::ExpressionContainer(container)) = &attr.value {
+                    if let Some(expr) = container.expression.as_expression() {
+                        context.register_helper("escape");
+                        result.push_dynamic(expr_to_string(expr), false, false);
+                        return;
+                    }
                 }
             }
         }
@@ -251,15 +256,16 @@ fn transform_children<'a>(
             }
 
             oxc_ast::ast::JSXChild::ExpressionContainer(container) => {
-                if let Some(_expr) = container.expression.as_expression() {
+                if let Some(expr) = container.expression.as_expression() {
+                    let expr_str = expr_to_string(expr);
                     context.register_helper("escape");
 
                     if result.skip_escape {
                         // Inside script/style - don't escape
-                        result.push_dynamic("/* expr */".to_string(), false, true);
+                        result.push_dynamic(expr_str, false, true);
                     } else {
                         // Normal content - escape
-                        result.push_dynamic("/* expr */".to_string(), false, false);
+                        result.push_dynamic(expr_str, false, false);
                     }
                 }
             }
