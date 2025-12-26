@@ -137,7 +137,9 @@ impl<'a> SSRTransform<'a> {
 }
 
 impl<'a> Traverse<'a, ()> for SSRTransform<'a> {
-    fn enter_expression(
+    // Use exit_expression instead of enter_expression to avoid
+    // oxc_traverse walking into our newly created nodes (which lack scope info)
+    fn exit_expression(
         &mut self,
         node: &mut Expression<'a>,
         ctx: &mut TraverseCtx<'a, ()>,

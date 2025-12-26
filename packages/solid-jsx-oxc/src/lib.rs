@@ -253,4 +253,22 @@ mod tests {
             println!("\n=== {} ===\nInput:  {}\nOutput: {}", label, source, result.code);
         }
     }
+
+    #[test]
+    fn test_dom_output_preview() {
+        // Test various DOM outputs
+        let cases = [
+            (r#"<div class="hello">world</div>"#, "basic element"),
+            (r#"<div class={style()}>content</div>"#, "dynamic class"),
+            (r#"<div>{count()}</div>"#, "dynamic child"),
+            (r#"<div onClick={handler}>click</div>"#, "event handler"),
+            (r#"<Button onClick={handler}>Click me</Button>"#, "component"),
+        ];
+
+        for (source, label) in cases {
+            // DOM mode is the default
+            let result = transform(source, None);
+            println!("\n=== DOM: {} ===\nInput:  {}\nOutput: {}", label, source, result.code);
+        }
+    }
 }

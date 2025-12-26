@@ -6,7 +6,7 @@ use oxc_ast::ast::{
     JSXAttributeValue, JSXChild,
 };
 
-use common::{TransformOptions, is_built_in, is_dynamic};
+use common::{TransformOptions, is_built_in, is_dynamic, expr_to_string};
 
 use crate::ir::{BlockContext, TransformResult, Expr};
 
@@ -31,7 +31,7 @@ pub fn transform_component<'a>(
 
     // Generate createComponent call
     result.exprs.push(Expr {
-        code: format!("_createComponent({}, {})", tag_name, props),
+        code: format!("createComponent({}, {})", tag_name, props),
     });
 
     result
@@ -60,7 +60,7 @@ fn transform_builtin<'a>(
             // Fallback to regular component transform
             context.register_helper("createComponent");
             result.exprs.push(Expr {
-                code: format!("_createComponent({}, {{}})", tag_name),
+                code: format!("createComponent({}, {{}})", tag_name),
             });
         }
     }
@@ -73,20 +73,28 @@ fn transform_for<'a>(
     element: &JSXElement<'a>,
     result: &mut TransformResult,
     context: &BlockContext,
-    options: &TransformOptions<'a>,
+    _options: &TransformOptions<'a>,
 ) {
     context.register_helper("createComponent");
     context.register_helper("For");
 
     // Get the 'each' prop
-    let each_prop = find_prop(element, "each");
+    let each_expr = find_prop(element, "each")
+        .and_then(|attr| attr.value.as_ref())
+        .and_then(|v| match v {
+            JSXAttributeValue::ExpressionContainer(c) => c.expression.as_expression(),
+            _ => None,
+        })
+        .map(|e| expr_to_string(e))
+        .unwrap_or_else(|| "undefined".to_string());
 
     // Get the children (callback function)
     let children = get_children_callback(element);
 
     result.exprs.push(Expr {
         code: format!(
-            "_createComponent(_For, {{ each: /* each */, children: /* callback */ }})"
+            "createComponent(For, {{ each: {}, children: {} }})",
+            each_expr, children
         ),
     });
 }
@@ -96,14 +104,38 @@ fn transform_show<'a>(
     element: &JSXElement<'a>,
     result: &mut TransformResult,
     context: &BlockContext,
-    options: &TransformOptions<'a>,
+    _options: &TransformOptions<'a>,
 ) {
     context.register_helper("createComponent");
     context.register_helper("Show");
 
+    // Get the 'when' prop
+    let when_expr = find_prop(element, "when")
+        .and_then(|attr| attr.value.as_ref())
+        .and_then(|v| match v {
+            JSXAttributeValue::ExpressionContainer(c) => c.expression.as_expression(),
+            _ => None,
+        })
+        .map(|e| expr_to_string(e))
+        .unwrap_or_else(|| "undefined".to_string());
+
+    // Get the 'fallback' prop
+    let fallback_expr = find_prop(element, "fallback")
+        .and_then(|attr| attr.value.as_ref())
+        .and_then(|v| match v {
+            JSXAttributeValue::ExpressionContainer(c) => c.expression.as_expression(),
+            _ => None,
+        })
+        .map(|e| expr_to_string(e))
+        .unwrap_or_else(|| "undefined".to_string());
+
+    // Get the children
+    let children = get_children_callback(element);
+
     result.exprs.push(Expr {
         code: format!(
-            "_createComponent(_Show, {{ when: /* when */, fallback: /* fallback */, children: /* children */ }})"
+            "createComponent(Show, {{ when: {}, fallback: {}, children: {} }})",
+            when_expr, fallback_expr, children
         ),
     });
 }
@@ -227,11 +259,11 @@ fn transform_error_boundary<'a>(
 fn build_props<'a>(
     element: &JSXElement<'a>,
     context: &BlockContext,
-    options: &TransformOptions<'a>,
+    _options: &TransformOptions<'a>,
 ) -> String {
     let mut static_props: Vec<String> = vec![];
     let mut dynamic_props: Vec<String> = vec![];
-    let mut has_spread = false;
+    let mut spreads: Vec<String> = vec![];
 
     for attr in &element.opening_element.attributes {
         match attr {
@@ -249,14 +281,15 @@ fn build_props<'a>(
                     }
                     Some(JSXAttributeValue::ExpressionContainer(container)) => {
                         if let Some(expr) = container.expression.as_expression() {
+                            let expr_str = expr_to_string(expr);
                             if is_dynamic(expr) {
                                 // Dynamic prop - use getter
                                 dynamic_props.push(format!(
-                                    "get {}() {{ return /* expr */; }}",
-                                    key
+                                    "get {}() {{ return {}; }}",
+                                    key, expr_str
                                 ));
                             } else {
-                                static_props.push(format!("{}: /* expr */", key));
+                                static_props.push(format!("{}: {}", key, expr_str));
                             }
                         }
                     }
@@ -266,46 +299,90 @@ fn build_props<'a>(
                     _ => {}
                 }
             }
-            JSXAttributeItem::SpreadAttribute(_) => {
-                has_spread = true;
+            JSXAttributeItem::SpreadAttribute(spread) => {
+                spreads.push(expr_to_string(&spread.argument));
             }
         }
     }
 
     // Handle children
     if !element.children.is_empty() {
-        let children_expr = get_children_expr(element, context, options);
+        let children_expr = get_children_expr(element, context);
         if !children_expr.is_empty() {
             dynamic_props.push(format!("get children() {{ return {}; }}", children_expr));
         }
     }
 
+    // Combine all props
+    let all_props = static_props.into_iter()
+        .chain(dynamic_props)
+        .collect::<Vec<_>>()
+        .join(", ");
+
     // Combine props
-    if has_spread {
+    if !spreads.is_empty() {
         context.register_helper("mergeProps");
-        format!("_mergeProps(/* spread */, {{ {} }})",
-            static_props.into_iter().chain(dynamic_props).collect::<Vec<_>>().join(", "))
-    } else if dynamic_props.is_empty() && static_props.is_empty() {
+        let spread_list = spreads.join(", ");
+        if all_props.is_empty() {
+            format!("mergeProps({})", spread_list)
+        } else {
+            format!("mergeProps({}, {{ {} }})", spread_list, all_props)
+        }
+    } else if all_props.is_empty() {
         "{}".to_string()
     } else {
-        format!("{{ {} }}",
-            static_props.into_iter().chain(dynamic_props).collect::<Vec<_>>().join(", "))
+        format!("{{ {} }}", all_props)
     }
 }
 
 /// Get children as an expression
 fn get_children_expr<'a>(
     element: &JSXElement<'a>,
-    context: &BlockContext,
-    options: &TransformOptions<'a>,
+    _context: &BlockContext,
 ) -> String {
-    if element.children.len() == 1 {
-        // Single child
-        "/* single child */"
+    let mut children: Vec<String> = vec![];
+
+    for child in &element.children {
+        match child {
+            JSXChild::Text(text) => {
+                let content = common::expression::trim_whitespace(&text.value);
+                if !content.is_empty() {
+                    children.push(format!("\"{}\"", common::expression::escape_html(&content, false)));
+                }
+            }
+            JSXChild::ExpressionContainer(container) => {
+                if let Some(expr) = container.expression.as_expression() {
+                    children.push(expr_to_string(expr));
+                }
+            }
+            JSXChild::Element(child_elem) => {
+                // Nested JSX element - this will be transformed by the traversal
+                // For now, output a placeholder that represents the element call
+                let tag = common::get_tag_name(child_elem);
+                if common::is_component(&tag) {
+                    // Component
+                    children.push(format!("/* <{}> */", tag));
+                } else {
+                    // Native element - would be a template clone
+                    children.push(format!("/* <{}> */", tag));
+                }
+            }
+            JSXChild::Fragment(_) => {
+                children.push("/* fragment */".to_string());
+            }
+            JSXChild::Spread(spread) => {
+                children.push(expr_to_string(&spread.expression));
+            }
+        }
+    }
+
+    if children.len() == 1 {
+        children.pop().unwrap_or_default()
+    } else if children.is_empty() {
+        String::new()
     } else {
-        // Multiple children - array
-        "[/* children */]"
-    }.to_string()
+        format!("[{}]", children.join(", "))
+    }
 }
 
 /// Find a prop by name
@@ -326,5 +403,14 @@ fn find_prop<'a>(element: &'a JSXElement<'a>, name: &str) -> Option<&'a JSXAttri
 fn get_children_callback<'a>(element: &JSXElement<'a>) -> String {
     // The children of For/Index should be an arrow function
     // <For each={items}>{item => <div>{item}</div>}</For>
-    "/* callback */".to_string()
+    for child in &element.children {
+        if let JSXChild::ExpressionContainer(container) = child {
+            if let Some(expr) = container.expression.as_expression() {
+                // This should be an arrow function like: item => <div>{item}</div>
+                return expr_to_string(expr);
+            }
+        }
+    }
+    // If no expression child found, return a no-op function
+    "() => undefined".to_string()
 }

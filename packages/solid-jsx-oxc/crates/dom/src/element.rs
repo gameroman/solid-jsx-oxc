@@ -3,14 +3,13 @@
 
 use oxc_ast::ast::{
     JSXElement, JSXAttribute, JSXAttributeItem, JSXAttributeName,
-    JSXAttributeValue, JSXExpressionContainer,
+    JSXAttributeValue,
 };
-use oxc_span::GetSpan;
 
 use common::{
-    TransformOptions, GenerateMode,
-    is_svg_element, is_dynamic,
-    constants::{PROPERTIES, CHILD_PROPERTIES, ALIASES, DELEGATED_EVENTS, VOID_ELEMENTS},
+    TransformOptions,
+    is_svg_element, is_dynamic, expr_to_string,
+    constants::{ALIASES, DELEGATED_EVENTS, VOID_ELEMENTS},
     expression::{escape_html, to_event_name},
 };
 
@@ -81,10 +80,12 @@ fn transform_attributes<'a>(
             JSXAttributeItem::SpreadAttribute(spread) => {
                 // Handle {...props} spread
                 context.register_helper("spread");
+                let spread_expr = expr_to_string(&spread.argument);
                 result.exprs.push(Expr {
                     code: format!(
-                        "_spread({}, /* spread expr */, {}, {})",
+                        "spread({}, {}, {}, {})",
                         elem_id,
+                        spread_expr,
                         result.is_svg,
                         !element.children.is_empty()
                     ),
@@ -136,20 +137,28 @@ fn transform_attribute<'a>(
         Some(JSXAttributeValue::ExpressionContainer(container)) => {
             // Dynamic attribute - needs effect
             if let Some(expr) = container.expression.as_expression() {
+                let expr_str = expr_to_string(expr);
                 if is_dynamic(expr) {
                     // Dynamic - wrap in effect
                     result.dynamics.push(DynamicBinding {
                         elem: elem_id.to_string(),
                         key: key.clone(),
-                        value: format!("/* dynamic expr */"),
+                        value: expr_str,
                         is_svg: result.is_svg,
                         is_ce: result.has_custom_element,
                         tag_name: result.tag_name.clone().unwrap_or_default(),
                     });
                 } else {
-                    // Static expression - inline
-                    let attr_key = ALIASES.get(key.as_str()).copied().unwrap_or(key.as_str());
-                    result.template.push_str(&format!(" {}=\"/* static expr */\"", attr_key));
+                    // Static expression - we need to evaluate it at build time
+                    // For now, treat as dynamic to be safe
+                    result.dynamics.push(DynamicBinding {
+                        elem: elem_id.to_string(),
+                        key: key.clone(),
+                        value: expr_str,
+                        is_svg: result.is_svg,
+                        is_ce: result.has_custom_element,
+                        tag_name: result.tag_name.clone().unwrap_or_default(),
+                    });
                 }
             }
         }
@@ -168,13 +177,23 @@ fn transform_ref<'a>(
     result: &mut TransformResult,
     context: &BlockContext,
 ) {
-    context.register_helper("use");
-
     if let Some(JSXAttributeValue::ExpressionContainer(container)) = &attr.value {
-        // ref={myRef} or ref={el => myRef = el}
-        result.exprs.push(Expr {
-            code: format!("_use(/* ref */, {})", elem_id),
-        });
+        if let Some(expr) = container.expression.as_expression() {
+            let ref_expr = expr_to_string(expr);
+            // Check if it's a function or a variable
+            if ref_expr.contains("=>") || ref_expr.starts_with("(") {
+                // It's a callback: ref={el => myRef = el}
+                result.exprs.push(Expr {
+                    code: format!("typeof {} === \"function\" ? {}({}) : {} = {}",
+                        ref_expr, ref_expr, elem_id, ref_expr, elem_id),
+                });
+            } else {
+                // It's a variable: ref={myRef}
+                result.exprs.push(Expr {
+                    code: format!("{} = {}", ref_expr, elem_id),
+                });
+            }
+        }
     }
 }
 
@@ -189,6 +208,15 @@ fn transform_event<'a>(
 ) {
     let event_name = to_event_name(key);
 
+    // Get the handler expression
+    let handler = if let Some(JSXAttributeValue::ExpressionContainer(container)) = &attr.value {
+        container.expression.as_expression()
+            .map(|e| expr_to_string(e))
+            .unwrap_or_else(|| "undefined".to_string())
+    } else {
+        "undefined".to_string()
+    };
+
     // Check if this event should be delegated
     let should_delegate = options.delegate_events
         && (DELEGATED_EVENTS.contains(event_name.as_str())
@@ -197,14 +225,14 @@ fn transform_event<'a>(
     if should_delegate {
         context.register_delegate(&event_name);
         result.exprs.push(Expr {
-            code: format!("{}.$${}  = /* handler */", elem_id, event_name),
+            code: format!("{}.$${} = {}", elem_id, event_name, handler),
         });
     } else {
         context.register_helper("addEventListener");
         result.exprs.push(Expr {
             code: format!(
-                "_addEventListener({}, \"{}\", /* handler */)",
-                elem_id, event_name
+                "addEventListener({}, \"{}\", {}, false)",
+                elem_id, event_name, handler
             ),
         });
     }
@@ -221,10 +249,18 @@ fn transform_directive<'a>(
     context.register_helper("use");
     let directive_name = &key[4..]; // Strip "use:"
 
+    let value = if let Some(JSXAttributeValue::ExpressionContainer(container)) = &attr.value {
+        container.expression.as_expression()
+            .map(|e| format!("() => {}", expr_to_string(e)))
+            .unwrap_or_else(|| "undefined".to_string())
+    } else {
+        "undefined".to_string()
+    };
+
     result.exprs.push(Expr {
         code: format!(
-            "_use({}, {}, () => /* directive value */)",
-            directive_name, elem_id
+            "use({}, {}, {})",
+            directive_name, elem_id, value
         ),
     });
 }
@@ -261,11 +297,21 @@ fn transform_children<'a>(
             }
             oxc_ast::ast::JSXChild::ExpressionContainer(container) => {
                 // Dynamic child - needs insert
-                context.register_helper("insert");
-                if let Some(id) = &result.id {
-                    result.exprs.push(Expr {
-                        code: format!("_insert({}, /* child expr */)", id),
-                    });
+                if let Some(expr) = container.expression.as_expression() {
+                    context.register_helper("insert");
+                    let child_expr = expr_to_string(expr);
+                    if let Some(id) = &result.id {
+                        // Check if it's a reactive expression
+                        if is_dynamic(expr) {
+                            result.exprs.push(Expr {
+                                code: format!("insert({}, () => {})", id, child_expr),
+                            });
+                        } else {
+                            result.exprs.push(Expr {
+                                code: format!("insert({}, {})", id, child_expr),
+                            });
+                        }
+                    }
                 }
             }
             _ => {}
