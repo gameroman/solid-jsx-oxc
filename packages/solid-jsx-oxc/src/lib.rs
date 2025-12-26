@@ -269,6 +269,9 @@ mod tests {
             (r#"<Show when={visible}><div class="content">shown</div></Show>"#, "Show with JSX child"),
             (r#"<div><span class={style()}>nested dynamic</span></div>"#, "nested dynamic element"),
             (r#"<div><span onClick={handler}>nested event</span></div>"#, "nested event handler"),
+            (r#"<div style={{ color: 'red', fontSize: 14 }}>styled</div>"#, "style object"),
+            (r#"<div style={dynamicStyle()}>dynamic style</div>"#, "dynamic style"),
+            (r#"<div innerHTML={html} />"#, "innerHTML"),
         ];
 
         for (source, label) in cases {

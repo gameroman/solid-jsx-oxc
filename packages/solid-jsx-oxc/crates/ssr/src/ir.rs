@@ -41,6 +41,9 @@ pub struct TemplateValue {
 
     /// Whether to skip escaping entirely
     pub skip_escape: bool,
+
+    /// Whether this needs hydration markers (for dynamic children)
+    pub needs_hydration_marker: bool,
 }
 
 impl SSRResult {
@@ -61,6 +64,11 @@ impl SSRResult {
 
     /// Append a dynamic value
     pub fn push_dynamic(&mut self, expr: String, is_attr: bool, skip_escape: bool) {
+        self.push_dynamic_with_marker(expr, is_attr, skip_escape, !is_attr)
+    }
+
+    /// Append a dynamic value with explicit hydration marker control
+    pub fn push_dynamic_with_marker(&mut self, expr: String, is_attr: bool, skip_escape: bool, needs_marker: bool) {
         // Ensure we have a template part before this value
         if self.template_parts.len() == self.template_values.len() {
             self.template_parts.push(String::new());
@@ -69,6 +77,7 @@ impl SSRResult {
             expr,
             is_attr,
             skip_escape,
+            needs_hydration_marker: needs_marker,
         });
         // Add empty part for after this value
         self.template_parts.push(String::new());
@@ -89,6 +98,11 @@ impl SSRResult {
 
     /// Generate the final ssr tagged template call
     pub fn to_ssr_call(&self) -> String {
+        self.to_ssr_call_with_hydration(false)
+    }
+
+    /// Generate the final ssr tagged template call with optional hydration markers
+    pub fn to_ssr_call_with_hydration(&self, hydratable: bool) -> String {
         if self.template_values.is_empty() {
             // No dynamic values, just return static string
             format!("\"{}\"", self.template_parts.join(""))
@@ -100,6 +114,12 @@ impl SSRResult {
                 result.push_str(part);
                 if i < self.template_values.len() {
                     let val = &self.template_values[i];
+
+                    // Add hydration marker before dynamic content (not for attributes)
+                    if hydratable && !val.is_attr && val.needs_hydration_marker {
+                        result.push_str("<!--#-->");
+                    }
+
                     result.push_str("${");
                     if val.skip_escape {
                         result.push_str(&val.expr);
@@ -109,6 +129,11 @@ impl SSRResult {
                         result.push_str(&format!("escape({})", val.expr));
                     }
                     result.push('}');
+
+                    // Add closing hydration marker
+                    if hydratable && !val.is_attr && val.needs_hydration_marker {
+                        result.push_str("<!--/-->");
+                    }
                 }
             }
 
