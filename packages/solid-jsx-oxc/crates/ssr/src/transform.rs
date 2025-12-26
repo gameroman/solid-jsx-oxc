@@ -2,15 +2,16 @@
 //!
 //! This implements the Traverse trait to walk the AST and transform JSX for SSR.
 
-use oxc_allocator::Allocator;
+use oxc_allocator::{Allocator, CloneIn};
 use oxc_ast::ast::{
     Expression, JSXElement, JSXFragment, JSXChild, JSXExpressionContainer,
     JSXText, Program, Statement, ImportOrExportKind, ModuleExportName,
-    ImportDeclarationSpecifier,
+    ImportDeclarationSpecifier, TemplateElementValue,
 };
-use oxc_span::Span;
+use oxc_span::{Span, SourceType};
 use oxc_traverse::{Traverse, TraverseCtx, traverse_mut};
 use oxc_semantic::SemanticBuilder;
+use oxc_parser::Parser;
 
 use common::{TransformOptions, is_component, get_tag_name};
 
@@ -221,18 +222,139 @@ impl<'a> SSRTransform<'a> {
         let ast = ctx.ast;
         let span = Span::default();
 
-        // Generate the SSR call string representation
-        let ssr_code = result.to_ssr_call();
+        // If no dynamic values, just return a string literal
+        if result.template_values.is_empty() {
+            let content = result.template_parts.join("");
+            let allocated_str = ast.allocator.alloc_str(&content);
+            return ast.expression_string_literal(span, allocated_str, None);
+        }
 
-        // Allocate the string in the arena
-        let allocated_str = ast.allocator.alloc_str(&ssr_code);
+        // Build a proper TaggedTemplateExpression: ssr`...${expr}...`
+        self.context.register_helper("ssr");
 
-        // For now, output as a simple string literal
-        // This is a simplified output - the actual output should be:
-        // - String literal for static content
-        // - Tagged template literal for dynamic content: ssr`...${escape(expr)}...`
-        //
-        // The string output shows what the final code should look like
-        ast.expression_string_literal(span, allocated_str, None)
+        // Build quasis (static template parts)
+        let mut quasis = ast.vec();
+        for (i, part) in result.template_parts.iter().enumerate() {
+            let is_tail = i == result.template_parts.len() - 1;
+            let part_str = ast.allocator.alloc_str(part);
+            let value = TemplateElementValue {
+                raw: ast.atom(part_str),
+                cooked: Some(ast.atom(part_str)),
+            };
+            let element = ast.template_element(span, value, is_tail);
+            quasis.push(element);
+        }
+
+        // Build expressions (dynamic parts)
+        let mut expressions = ast.vec();
+        for val in &result.template_values {
+            let expr = self.parse_and_wrap_expression(&val.expr, val.is_attr, val.skip_escape, ctx);
+            expressions.push(expr);
+        }
+
+        // Build the template literal
+        let template = ast.template_literal(span, quasis, expressions);
+
+        // Build the tag (ssr identifier)
+        let tag = ast.expression_identifier(span, "ssr");
+
+        // Build the tagged template expression
+        // Args: span, tag, type_arguments, quasi (template)
+        ast.expression_tagged_template(
+            span,
+            tag,
+            None::<oxc_ast::ast::TSTypeParameterInstantiation<'a>>,
+            template,
+        )
+    }
+
+    /// Parse an expression string and wrap it appropriately
+    fn parse_and_wrap_expression(
+        &self,
+        expr_str: &str,
+        is_attr: bool,
+        skip_escape: bool,
+        ctx: &mut TraverseCtx<'a, ()>,
+    ) -> Expression<'a> {
+        let ast = ctx.ast;
+        let span = Span::default();
+
+        // Try to parse the expression
+        let parsed_expr = self.parse_expression(expr_str, ctx);
+
+        if skip_escape {
+            // Don't wrap in escape()
+            parsed_expr
+        } else if is_attr {
+            // Wrap in escape(expr, true)
+            self.build_escape_call(parsed_expr, true, ctx)
+        } else {
+            // Wrap in escape(expr)
+            self.build_escape_call(parsed_expr, false, ctx)
+        }
+    }
+
+    /// Parse an expression string into an AST Expression
+    fn parse_expression(
+        &self,
+        expr_str: &str,
+        ctx: &mut TraverseCtx<'a, ()>,
+    ) -> Expression<'a> {
+        let ast = ctx.ast;
+        let span = Span::default();
+
+        // Use the arena allocator to parse the expression
+        let allocator = ast.allocator;
+
+        // Parse the expression string
+        let source_type = SourceType::tsx();
+        let parse_result = Parser::new(allocator, expr_str, source_type).parse();
+
+        // Try to extract the expression from the parsed program
+        if let Some(stmt) = parse_result.program.body.first() {
+            if let Statement::ExpressionStatement(expr_stmt) = stmt {
+                // Clone the expression into our allocator
+                // Note: This is a simplified approach - ideally we'd transfer ownership
+                return expr_stmt.expression.clone_in(allocator);
+            }
+        }
+
+        // Fallback: create an identifier from the expression string
+        // This handles simple cases like variable names
+        let expr_alloc = ast.allocator.alloc_str(expr_str);
+        ast.expression_identifier(span, expr_alloc)
+    }
+
+    /// Build an escape() call expression
+    fn build_escape_call(
+        &self,
+        expr: Expression<'a>,
+        is_attr: bool,
+        ctx: &mut TraverseCtx<'a, ()>,
+    ) -> Expression<'a> {
+        let ast = ctx.ast;
+        let span = Span::default();
+
+        // Create: escape(expr) or escape(expr, true)
+        let callee = ast.expression_identifier(span, "escape");
+
+        let mut args = ast.vec();
+
+        // First argument: the expression
+        args.push(oxc_ast::ast::Argument::from(expr));
+
+        if is_attr {
+            // Second argument: true (for attribute escaping)
+            let true_lit = ast.expression_boolean_literal(span, true);
+            args.push(oxc_ast::ast::Argument::from(true_lit));
+        }
+
+        ast.expression_call(
+            span,
+            callee,
+            None::<oxc_ast::ast::TSTypeParameterInstantiation<'a>>,
+            args,
+            false,
+        )
     }
 }
