@@ -31,7 +31,8 @@
   "author": "SolidJS Contributors",
   "license": "MIT",
   "peerDependencies": {
-    "rolldown": ">=0.1.0"
+    "rolldown": ">=0.1.0",
+    "solid-jsx-oxc": "*"
   },
   "peerDependenciesMeta": {
     "rolldown": {
@@ -39,9 +40,10 @@
     }
   },
   "dependencies": {
-    "solid-jsx-oxc": "workspace:*"
+    "@rollup/pluginutils": "^5.0.0"
   },
   "devDependencies": {
+    "solid-jsx-oxc": "*",
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"

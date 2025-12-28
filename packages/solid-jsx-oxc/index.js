@@ -77,19 +77,9 @@ function transform(source, options = {}) {
 
   const mergedOptions = { ...defaultOptions, ...options };
 
-  // Map options to match Rust struct field names (snake_case)
-  const rustOptions = {
-    module_name: mergedOptions.moduleName,
-    generate: mergedOptions.generate,
-    hydratable: mergedOptions.hydratable,
-    delegate_events: mergedOptions.delegateEvents,
-    wrap_conditionals: mergedOptions.wrapConditionals,
-    context_to_custom_elements: mergedOptions.contextToCustomElements,
-    filename: mergedOptions.filename,
-    source_map: mergedOptions.sourceMap,
-  };
-
-  return nativeBinding.transformJsx(source, rustOptions);
+  // NAPI-RS automatically converts camelCase (JS) to snake_case (Rust)
+  // so we can pass options directly without manual conversion
+  return nativeBinding.transformJsx(source, mergedOptions);
 }
 
 /**

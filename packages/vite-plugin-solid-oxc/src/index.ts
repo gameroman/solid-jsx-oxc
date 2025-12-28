@@ -152,13 +152,13 @@ export default function solidOxc(options: SolidOxcOptions = {}): Plugin {
       try {
         const result = solidJsxOxc.transformJsx(code, {
           filename: fileId,
-          module_name: opts.moduleName,
+          moduleName: opts.moduleName,
           generate,
           hydratable: opts.hydratable,
-          delegate_events: opts.delegateEvents,
-          wrap_conditionals: opts.wrapConditionals,
-          context_to_custom_elements: opts.contextToCustomElements,
-          source_map: true,
+          delegateEvents: opts.delegateEvents,
+          wrapConditionals: opts.wrapConditionals,
+          contextToCustomElements: opts.contextToCustomElements,
+          sourceMap: true,
         });
 
         // Add HMR support in dev mode
@@ -175,8 +175,9 @@ if (import.meta.hot) {
           code: result.code,
           map: result.map ? JSON.parse(result.map) : null,
         };
-      } catch (e: any) {
-        this.error(`Failed to transform ${id}: ${e.message}`);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        this.error(`Failed to transform ${id}: ${message}`);
         return null;
       }
     },

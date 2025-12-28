@@ -10,6 +10,17 @@ import { createFilter, type FilterPattern } from '@rollup/pluginutils';
 
 export interface SolidOxcOptions {
   /**
+   * Dev mode - enables additional debugging
+   * @default false
+   */
+  dev?: boolean;
+
+  /**
+   * Hot module replacement (requires dev: true)
+   * @default true in dev mode
+   */
+  hot?: boolean;
+  /**
    * Filter which files to transform
    * @default /\.[jt]sx$/
    */
@@ -78,6 +89,8 @@ const defaultOptions: SolidOxcOptions = {
   delegateEvents: true,
   wrapConditionals: true,
   contextToCustomElements: true,
+  dev: false,
+  hot: true,
   builtIns: [
     'For',
     'Show',
@@ -116,7 +129,10 @@ export default function solidOxc(options: SolidOxcOptions = {}): Plugin {
     },
 
     async transform(code, id) {
-      if (!filter(id)) {
+      // Strip query parameters (e.g., ?v=123 from Vite/dev servers)
+      const fileId = id.split('?', 1)[0];
+
+      if (!filter(fileId)) {
         return null;
       }
 
@@ -129,7 +145,7 @@ export default function solidOxc(options: SolidOxcOptions = {}): Plugin {
 
       try {
         const result = solidJsxOxc.transformJsx(code, {
-          filename: id,
+          filename: fileId,
           moduleName: opts.moduleName,
           generate,
           hydratable: opts.hydratable,
@@ -139,12 +155,25 @@ export default function solidOxc(options: SolidOxcOptions = {}): Plugin {
           sourceMap: true,
         });
 
+        let finalCode = result.code;
+
+        // Add HMR support in dev mode
+        if (opts.dev && opts.hot !== false) {
+          const hotCode = `
+if (import.meta.hot) {
+  import.meta.hot.accept();
+}
+`;
+          finalCode = finalCode + hotCode;
+        }
+
         return {
-          code: result.code,
+          code: finalCode,
           map: result.map ? JSON.parse(result.map) : null,
         };
-      } catch (e: any) {
-        this.error(`Failed to transform ${id}: ${e.message}`);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        this.error(`Failed to transform ${id}: ${message}`);
         return null;
       }
     },
