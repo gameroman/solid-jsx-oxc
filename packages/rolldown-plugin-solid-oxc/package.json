@@ -39,9 +39,6 @@
       "optional": true
     }
   },
-  "dependencies": {
-    "@rollup/pluginutils": "^5.0.0"
-  },
   "devDependencies": {
     "solid-jsx-oxc": "*",
     "@types/node": "^20.0.0",

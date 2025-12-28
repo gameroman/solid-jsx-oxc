@@ -1,12 +1,41 @@
 /**
  * Rolldown plugin for SolidJS using OXC-based compiler
  *
- * This plugin is compatible with both Rolldown and Rollup.
  * Since Rolldown uses OXC internally, this provides optimal performance.
  */
 
 import type { Plugin } from 'rolldown';
-import { createFilter, type FilterPattern } from '@rollup/pluginutils';
+
+export type FilterPattern = RegExp | string | (RegExp | string)[] | null | undefined;
+
+/**
+ * Simple filter function for include/exclude patterns
+ */
+function createFilter(
+  include?: FilterPattern,
+  exclude?: FilterPattern
+): (id: string) => boolean {
+  const toArray = (pattern: FilterPattern): (RegExp | string)[] => {
+    if (pattern == null) return [];
+    if (Array.isArray(pattern)) return pattern;
+    return [pattern];
+  };
+
+  const includePatterns = toArray(include);
+  const excludePatterns = toArray(exclude);
+
+  const matches = (id: string, pattern: RegExp | string): boolean => {
+    if (pattern instanceof RegExp) return pattern.test(id);
+    return id.includes(pattern);
+  };
+
+  return (id: string) => {
+    // If no include patterns, include everything by default
+    const included = includePatterns.length === 0 || includePatterns.some(p => matches(id, p));
+    const excluded = excludePatterns.some(p => matches(id, p));
+    return included && !excluded;
+  };
+}
 
 export interface SolidOxcOptions {
   /**
