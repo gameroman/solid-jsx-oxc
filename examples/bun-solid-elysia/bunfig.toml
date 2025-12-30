@@ -1,0 +1,6 @@
+# Bun configuration for Solid + Elysia SSR
+# Note: We use Bun.build() with solid-oxc plugin, then run the compiled output
+# The preload approach doesn't work at runtime - Bun's built-in loader runs first
+
+# Preload for build.ts (registers plugin for Bun.build)
+preload = ["./preload.ts"]

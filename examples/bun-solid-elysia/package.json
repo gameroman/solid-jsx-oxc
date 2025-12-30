@@ -1,0 +1,19 @@
+{
+  "name": "bun-solid-elysia",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run build.ts && bun --watch dist/server.js",
+    "build": "bun run build.ts",
+    "start": "NODE_ENV=production bun dist/server.js"
+  },
+  "dependencies": {
+    "elysia": "^1.2.25",
+    "solid-js": "^1.9.9"
+  },
+  "devDependencies": {
+    "bun-plugin-solid-oxc": "workspace:*",
+    "solid-jsx-oxc": "workspace:*",
+    "typescript": "^5.7.2"
+  }
+}

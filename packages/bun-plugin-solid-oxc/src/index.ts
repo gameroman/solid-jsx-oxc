@@ -127,14 +127,11 @@ export default function solidOxc(options: SolidOxcOptions = {}): BunPlugin {
             sourceMap: false, // Bun handles source maps
           });
 
-          // Determine loader based on file extension
-          const loader = args.path.endsWith('.tsx') ? 'tsx' :
-                        args.path.endsWith('.ts') ? 'ts' :
-                        args.path.endsWith('.jsx') ? 'jsx' : 'js';
-
+          // Return as 'ts' - JSX is transformed but TypeScript syntax remains
+          // Using 'ts' prevents Bun's JSX transform while handling TS syntax
           return {
             contents: result.code,
-            loader,
+            loader: 'ts',
           };
         } catch (e: unknown) {
           const message = e instanceof Error ? e.message : String(e);

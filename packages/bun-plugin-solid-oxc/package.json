@@ -34,10 +34,10 @@
   "author": "SolidJS Contributors",
   "license": "MIT",
   "peerDependencies": {
-    "solid-jsx-oxc": "*"
+    "solid-jsx-oxc": ">=0.1.0"
   },
   "devDependencies": {
-    "solid-jsx-oxc": "*",
+    "solid-jsx-oxc": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.0.0"
   }
