@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run build.ts && bun --watch dist/server.js",
-    "build": "bun run build.ts",
+    "dev": "bun run dev.ts",
+    "build": "NODE_ENV=production bun run build.ts",
     "start": "NODE_ENV=production bun dist/server.js"
   },
   "dependencies": {
