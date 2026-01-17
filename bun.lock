@@ -79,7 +79,7 @@
     },
     "packages/bun-plugin-solid-oxc": {
       "name": "bun-plugin-solid-oxc",
-      "version": "0.1.0",
+      "version": "0.1.0-alpha.8",
       "devDependencies": {
         "@types/bun": "latest",
         "solid-jsx-oxc": "workspace:*",
@@ -109,7 +109,7 @@
     },
     "packages/rolldown-plugin-solid-oxc": {
       "name": "rolldown-plugin-solid-oxc",
-      "version": "0.1.0",
+      "version": "0.1.0-alpha.8",
       "dependencies": {
         "solid-jsx-oxc": "workspace:^",
       },
@@ -128,14 +128,14 @@
     },
     "packages/solid-jsx-oxc": {
       "name": "solid-jsx-oxc",
-      "version": "0.1.0-alpha.2",
+      "version": "0.1.0-alpha.8",
       "devDependencies": {
-        "@napi-rs/cli": "^3.0.0-alpha.69",
+        "@napi-rs/cli": "^3.5.0",
       },
     },
     "packages/vite-plugin-solid-oxc": {
       "name": "vite-plugin-solid-oxc",
-      "version": "0.1.0",
+      "version": "0.1.0-alpha.8",
       "devDependencies": {
         "@types/node": "^20.0.0",
         "tsup": "^8.5.1",
