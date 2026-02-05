@@ -16,16 +16,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-      - name: Installing deps
-        run: pnpm install
-      - name: Building
-        run: pnpm run build
+      - name: Install deps
+        run: bun install
+      - name: Build native addon
+        working-directory: packages/solid-jsx-oxc
+        run: bun run build
+      - name: Build plugins
+        run: |
+          cd packages/vite-plugin-solid-oxc && bun run build && cd ../..
+          cd packages/rolldown-plugin-solid-oxc && bun run build && cd ../..
       - name: Publish preview packages
-        run: npx pkg-pr-new publish --pnpm --packageManager=pnpm
+        run: bunx pkg-pr-new publish ./packages/solid-jsx-oxc ./packages/vite-plugin-solid-oxc ./packages/rolldown-plugin-solid-oxc ./packages/bun-plugin-solid-oxc
