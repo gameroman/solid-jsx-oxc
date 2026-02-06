@@ -475,7 +475,7 @@ fn transform_ref<'a>(
     }
 }
 
-fn is_writable_ref_target<'a>(expr: &Expression<'a>, ctx: &TraverseCtx<'a, ()>) -> bool {
+pub(crate) fn is_writable_ref_target<'a>(expr: &Expression<'a>, ctx: &TraverseCtx<'a, ()>) -> bool {
     let Some(ident) = peel_identifier_reference(expr) else {
         return true;
     };
